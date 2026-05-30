@@ -1,1 +1,1 @@
-[{"role":"user","content":"say hello"},{"role":"assistant","content":"Hello! How can I assist you today? 😊","reasoning_content":"The user just said \"say hello\". Let me respond with a friendly greeting."}]
+[{"role":"user","content":"你好"},{"role":"assistant","content":"你好！我是你的AI助手。有什么我可以帮你的吗？😊","reasoning_content":"用户用中文打招呼。我需要用中文回应。目前没有需要调用工具的地方，先友好地回复一下。"}]

@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <errno.h>
 
+#include "linereader.h"
+
 #include "conf.h"
 #include "agent.h"
 #include "tools.h"
@@ -90,29 +92,32 @@ static void setup_tools(agent_conf_t *conf)
 
 static int interactive_loop(agent_t *agent, FILE *in, FILE *out)
 {
-    char line[65536];
+    (void)in;
+    (void)out;
+
     while (1)
     {
-        fprintf(out, "> ");
-        fflush(out);
-
-        if (!fgets(line, sizeof(line), in))
+        char *line = lr_readline("> ", in, out);
+        if (!line)
             break;
-
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n')
-            line[len - 1] = '\0';
 
         if (line[0] == '\0')
+        {
+            free(line);
             continue;
+        }
 
         if (strcmp(line, "/exit") == 0 || strcmp(line, "/quit") == 0)
+        {
+            free(line);
             break;
+        }
 
         if (strcmp(line, "/clear") == 0)
         {
             agent_clear_history(agent);
             fprintf(out, "history cleared\n");
+            free(line);
             continue;
         }
 
@@ -125,6 +130,7 @@ static int interactive_loop(agent_t *agent, FILE *in, FILE *out)
                 fprintf(out, "history saved\n");
             else
                 fprintf(out, "failed to save history\n");
+            free(line);
             continue;
         }
 
@@ -135,16 +141,22 @@ static int interactive_loop(agent_t *agent, FILE *in, FILE *out)
             if (!*p)
             {
                 fprintf(out, "usage: /load <file>\n");
+                free(line);
                 continue;
             }
             if (agent_load_history(agent, p) == 0)
                 fprintf(out, "history loaded from %s\n", p);
             else
                 fprintf(out, "failed to load history from %s\n", p);
+            free(line);
             continue;
         }
 
+        lr_add_history(line);
+
         char *resp = agent_chat(agent, line);
+        free(line);
+
         if (resp)
         {
             fprintf(out, "%s\n", resp);
@@ -170,8 +182,6 @@ static void run_daemon(agent_conf_t *conf)
     signal(SIGTTOU, SIG_IGN);
     signal(SIGTTIN, SIG_IGN);
 
-    if (freopen("/dev/null", "r", stdin)  == NULL) { perror("freopen stdin"); exit(1); }
-    if (freopen("/dev/null", "w", stdout) == NULL) { perror("freopen stdout"); exit(1); }
     if (freopen("/dev/null", "w", stderr) == NULL) { perror("freopen stderr"); exit(1); }
 
     const char *sock_path = conf->socket_path[0] ? conf->socket_path : "/tmp/minagent.sock";
@@ -221,9 +231,8 @@ static void run_daemon(agent_conf_t *conf)
         close(g_sock_fd);
         g_sock_fd = -1;
 
-        dup2(client_fd, STDIN_FILENO);
-        dup2(client_fd, STDOUT_FILENO);
-        if (client_fd > STDERR_FILENO) close(client_fd);
+        FILE *cf = fdopen(client_fd, "r+");
+        if (!cf) _exit(1);
 
         agent_t child_agent;
         if (agent_init(&child_agent, conf->model, conf->system_prompt,
@@ -234,9 +243,10 @@ static void run_daemon(agent_conf_t *conf)
         g_agent = &child_agent;
         g_conf = conf;
 
-        interactive_loop(&child_agent, stdin, stdout);
+        interactive_loop(&child_agent, cf, cf);
         agent_save_history(&child_agent, NULL);
         agent_free(&child_agent);
+        fclose(cf);
         _exit(0);
     }
 
@@ -320,6 +330,7 @@ int main(int argc, char *argv[])
     agent_save_history(&agent, NULL);
     agent_free(&agent);
     conf_free(&conf);
+    lr_cleanup();
     printf("bye\n");
     return 0;
 }
