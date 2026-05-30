@@ -242,32 +242,46 @@ static void run_daemon(agent_conf_t *conf)
 
 int main(int argc, char *argv[])
 {
-    char auto_conf_path[1024] = {0};
-    char exe_buf[1024] = {0};
-    ssize_t exe_len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
-    if (exe_len > 0)
+    char bin_dir[1024] = {0};
     {
-        exe_buf[exe_len] = '\0';
-        char *slash = strrchr(exe_buf, '/');
-        if (slash)
+        char exe_buf[1024] = {0};
+        ssize_t exe_len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+        if (exe_len > 0)
         {
-            *slash = '\0';  /* dir of binary */
-            snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", exe_buf);
-            if (access(auto_conf_path, F_OK) != 0)
+            exe_buf[exe_len] = '\0';
+            char *slash = strrchr(exe_buf, '/');
+            if (slash)
             {
-                slash = strrchr(exe_buf, '/');
-                if (slash)
-                {
-                    *slash = '\0';  /* parent dir */
-                    snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", exe_buf);
-                    if (access(auto_conf_path, F_OK) != 0)
-                        auto_conf_path[0] = '\0';
-                }
-                else
-                {
-                    auto_conf_path[0] = '\0';
-                }
+                *slash = '\0';
+                memcpy(bin_dir, exe_buf, sizeof(bin_dir) - 1);
             }
+        }
+    }
+
+    char auto_conf_path[1024] = {0};
+    snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", bin_dir);
+    if (!bin_dir[0] || access(auto_conf_path, F_OK) != 0)
+    {
+        if (bin_dir[0])
+        {
+            char *slash = strrchr(bin_dir, '/');
+            if (slash)
+            {
+                *slash = '\0';
+                snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", bin_dir);
+                if (access(auto_conf_path, F_OK) != 0)
+                    auto_conf_path[0] = '\0';
+            }
+            else
+            {
+                auto_conf_path[0] = '\0';
+            }
+            /* restore bin_dir */
+            if (slash) *slash = '/';
+        }
+        else
+        {
+            auto_conf_path[0] = '\0';
         }
     }
     const char *conf_path = auto_conf_path[0] ? auto_conf_path : "minagent.conf";
@@ -313,6 +327,17 @@ int main(int argc, char *argv[])
     if (override_model)   snprintf(conf.model,         sizeof(conf.model),         "%s", override_model);
     if (override_history) snprintf(conf.history_file,  sizeof(conf.history_file),  "%s", override_history);
     if (override_socket)  snprintf(conf.socket_path,   sizeof(conf.socket_path),   "%s", override_socket);
+
+    /* resolve history_file relative to binary directory */
+    if (bin_dir[0] && conf.history_file[0] && conf.history_file[0] != '/')
+    {
+        char full[1024];
+        snprintf(full, sizeof(full), "%s/%s", bin_dir, conf.history_file);
+        size_t flen = strlen(full);
+        if (flen >= sizeof(conf.history_file)) flen = sizeof(conf.history_file) - 1;
+        memcpy(conf.history_file, full, flen);
+        conf.history_file[flen] = '\0';
+    }
 
     setup_tools(&conf);
 
