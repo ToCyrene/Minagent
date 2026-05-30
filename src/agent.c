@@ -65,7 +65,7 @@ static tool_def_t *find_tool(const char *name)
 }
 
 int agent_init(agent_t *a, const char *model, const char *sys_prompt,
-               const char *history_path, int max_turns,
+               const char *history_path, int max_turns, int max_context_msgs,
                const char *api_url, const char *api_key)
 {
     memset(a, 0, sizeof(*a));
@@ -77,6 +77,7 @@ int agent_init(agent_t *a, const char *model, const char *sys_prompt,
     a->history_path = strdup(history_path ? history_path : "agent_history.json");
     if (!a->history_path) { free(a->model); free(a->system_prompt); return -1; }
     a->max_turns = (max_turns > 0) ? max_turns : 8;
+    a->max_context_msgs = (max_context_msgs > 0) ? max_context_msgs : 64;
 
     a->msg_cap = 16;
     a->msgs = malloc(sizeof(msg_t) * a->msg_cap);
@@ -118,6 +119,27 @@ static void msg_free(msg_t *m)
     free(m->tool_args);
 }
 
+static void agent_trim_history(agent_t *a)
+{
+    if (a->msg_count <= a->max_context_msgs)
+        return;
+
+    int sys_offset = (a->msg_count > 0 && a->msgs[0].role == ROLE_SYSTEM) ? 1 : 0;
+    int remove = a->msg_count - a->max_context_msgs;
+    if (remove <= sys_offset)
+        return;
+
+    for (int i = sys_offset; i < sys_offset + remove; i++)
+        msg_free(&a->msgs[i]);
+
+    int src = sys_offset + remove;
+    int dst = sys_offset;
+    int remain = a->msg_count - src;
+    memmove(&a->msgs[dst], &a->msgs[src], sizeof(msg_t) * remain);
+
+    a->msg_count = dst + remain;
+}
+
 void agent_clear_history(agent_t *a)
 {
     if (!a || !a->msgs) return;
@@ -151,6 +173,8 @@ char *agent_chat(agent_t *a, const char *input)
 
     for (int turn = 0; turn < a->max_turns; turn++)
     {
+        agent_trim_history(a);
+
         char *req = json_build_request(a->model, a->system_prompt,
                                         a->msgs, a->msg_count,
                                         g_tools, TOOL_COUNT);

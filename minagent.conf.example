@@ -5,6 +5,7 @@
 #
 # history_file    = agent_history.json
 # max_turns       = 8
+# max_context_msgs = 64
 # timeout         = 30
 #
 # allowed_dirs    = /tmp

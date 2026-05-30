@@ -21,6 +21,7 @@ int conf_load(const char *path, agent_conf_t *conf)
     memset(conf, 0, sizeof(*conf));
 
     conf->max_turns = 8;
+    conf->max_context_msgs = 64;
     conf->timeout = 30;
     conf->daemon = 0;
 
@@ -62,6 +63,8 @@ int conf_load(const char *path, agent_conf_t *conf)
             snprintf(conf->log_file, sizeof(conf->log_file), "%s", val);
         else if (strcmp(key, "max_turns") == 0)
             parse_int(val, &conf->max_turns);
+        else if (strcmp(key, "max_context_msgs") == 0)
+            parse_int(val, &conf->max_context_msgs);
         else if (strcmp(key, "timeout") == 0)
             parse_int(val, &conf->timeout);
         else if (strcmp(key, "daemon") == 0)
@@ -86,6 +89,7 @@ void conf_print(const agent_conf_t *conf)
     printf("socket_path:     %s\n", conf->socket_path);
     printf("log_file:        %s\n", conf->log_file);
     printf("max_turns:       %d\n", conf->max_turns);
+    printf("max_context_msgs:%d\n", conf->max_context_msgs);
     printf("timeout:         %d\n", conf->timeout);
     printf("daemon:          %s\n", conf->daemon ? "true" : "false");
 

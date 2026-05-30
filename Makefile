@@ -15,6 +15,7 @@ dirs:
 
 $(TARGET): $(OBJ) | dirs
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+	cp minagent.conf bin/
 
 obj/%.o: src/%.c | dirs
 	$(CC) $(CFLAGS) -c -o $@ $<

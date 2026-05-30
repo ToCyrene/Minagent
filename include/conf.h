@@ -13,6 +13,7 @@ typedef struct {
     char log_file[512];
 
     int max_turns;
+    int max_context_msgs;
     int timeout;
     int daemon;
 

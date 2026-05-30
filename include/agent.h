@@ -29,11 +29,12 @@ typedef struct {
     char   *system_prompt;
     char   *history_path;
     int     max_turns;
+    int     max_context_msgs;
     http_t  http;
 } agent_t;
 
 int agent_init(agent_t *a, const char *model, const char *sys_prompt,
-               const char *history_path, int max_turns,
+               const char *history_path, int max_turns, int max_context_msgs,
                const char *api_url, const char *api_key);
 int agent_load_history(agent_t *a, const char *path);
 int agent_save_history(agent_t *a, const char *path);

@@ -22,23 +22,14 @@ static const char   *g_conf_path = NULL;
 static int           g_sock_fd   = -1;
 static int           g_exit_flag = 0;
 
-static void save_history(void)
-{
-    if (g_agent)
-        agent_save_history(g_agent, NULL);
-}
-
 static void shutdown_signal(int sig)
 {
-    save_history();
     if (g_sock_fd >= 0)
     {
         close(g_sock_fd);
         if (g_conf && g_conf->socket_path[0])
             unlink(g_conf->socket_path);
     }
-    if (g_agent) agent_free(g_agent);
-    if (g_conf)  conf_free(g_conf);
     _exit(128 + sig);
 }
 
@@ -138,16 +129,11 @@ static int interactive_loop(agent_t *agent, FILE *in, FILE *out)
         {
             const char *p = line + 5;
             while (*p == ' ') p++;
-            if (!*p)
-            {
-                fprintf(out, "usage: /load <file>\n");
-                free(line);
-                continue;
-            }
-            if (agent_load_history(agent, p) == 0)
-                fprintf(out, "history loaded from %s\n", p);
+            const char *lpath = (*p) ? p : NULL;
+            if (agent_load_history(agent, lpath) == 0)
+                fprintf(out, "history loaded from %s\n", lpath ? lpath : agent->history_path);
             else
-                fprintf(out, "failed to load history from %s\n", p);
+                fprintf(out, "failed to load history\n");
             free(line);
             continue;
         }
@@ -237,6 +223,7 @@ static void run_daemon(agent_conf_t *conf)
         agent_t child_agent;
         if (agent_init(&child_agent, conf->model, conf->system_prompt,
                        conf->history_file, conf->max_turns,
+                       conf->max_context_msgs,
                        conf->api_url, conf->api_key) != 0)
             _exit(1);
 
@@ -244,7 +231,6 @@ static void run_daemon(agent_conf_t *conf)
         g_conf = conf;
 
         interactive_loop(&child_agent, cf, cf);
-        agent_save_history(&child_agent, NULL);
         agent_free(&child_agent);
         fclose(cf);
         _exit(0);
@@ -256,7 +242,36 @@ static void run_daemon(agent_conf_t *conf)
 
 int main(int argc, char *argv[])
 {
-    const char *conf_path = "minagent.conf";
+    char auto_conf_path[1024] = {0};
+    char exe_buf[1024] = {0};
+    ssize_t exe_len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    if (exe_len > 0)
+    {
+        exe_buf[exe_len] = '\0';
+        char *slash = strrchr(exe_buf, '/');
+        if (slash)
+        {
+            *slash = '\0';  /* dir of binary */
+            snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", exe_buf);
+            if (access(auto_conf_path, F_OK) != 0)
+            {
+                slash = strrchr(exe_buf, '/');
+                if (slash)
+                {
+                    *slash = '\0';  /* parent dir */
+                    snprintf(auto_conf_path, sizeof(auto_conf_path), "%s/minagent.conf", exe_buf);
+                    if (access(auto_conf_path, F_OK) != 0)
+                        auto_conf_path[0] = '\0';
+                }
+                else
+                {
+                    auto_conf_path[0] = '\0';
+                }
+            }
+        }
+    }
+    const char *conf_path = auto_conf_path[0] ? auto_conf_path : "minagent.conf";
+    int conf_path_explicit = 0;
     int daemon_mode = 0;
     const char *override_url = NULL;
     const char *override_key = NULL;
@@ -267,7 +282,7 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-c") == 0 && i + 1 < argc)
-            conf_path = argv[++i];
+        {   conf_path = argv[++i]; conf_path_explicit = 1; }
         else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--daemon") == 0)
             daemon_mode = 1;
         else if ((strcmp(argv[i], "-u") == 0 || strcmp(argv[i], "--url") == 0) && i + 1 < argc)
@@ -285,8 +300,12 @@ int main(int argc, char *argv[])
     agent_conf_t conf;
     if (conf_load(conf_path, &conf) != 0)
     {
-        fprintf(stderr, "failed to load config: %s\n", conf_path);
-        return 1;
+        if (conf_path_explicit)
+        {
+            fprintf(stderr, "failed to load config: %s\n", conf_path);
+            return 1;
+        }
+        /* no config file — defaults already set by conf_load */
     }
 
     if (override_url)     snprintf(conf.api_url,      sizeof(conf.api_url),      "%s", override_url);
@@ -309,6 +328,7 @@ int main(int argc, char *argv[])
     agent_t agent;
     if (agent_init(&agent, conf.model, conf.system_prompt,
                    conf.history_file, conf.max_turns,
+                   conf.max_context_msgs,
                    conf.api_url, conf.api_key) != 0)
     {
         fprintf(stderr, "failed to initialize agent\n");
@@ -327,7 +347,6 @@ int main(int argc, char *argv[])
 
     interactive_loop(&agent, stdin, stdout);
 
-    agent_save_history(&agent, NULL);
     agent_free(&agent);
     conf_free(&conf);
     lr_cleanup();

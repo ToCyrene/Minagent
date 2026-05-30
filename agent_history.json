@@ -1,1 +1,1 @@
-[{"role":"user","content":"你好"},{"role":"assistant","content":"你好！我是你的AI助手。有什么我可以帮你的吗？😊","reasoning_content":"用户用中文打招呼。我需要用中文回应。目前没有需要调用工具的地方，先友好地回复一下。"}]
+[{"role":"user","content":"1+1=?"},{"role":"assistant","content":"1+1=2"},{"role":"user","content":"我之前问了什么？"},{"role":"assistant","content":"您之前问的是 **\"1+1=?\"**，我回答了 **2**。😊","reasoning_content":"用户问我之前问了什么。让我看看对话记录。\n\n之前的对话是：\n用户：1+1=?\n我：1+1=2\n\n然后用户现在问：\"我之前问了什么？\"\n\n所以用户之前问的是\"1+1=?\"。"}]
