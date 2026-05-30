@@ -14,6 +14,7 @@ int json_get_str(const char *json, const char *path, char *out, size_t outlen);
 int json_get_int(const char *json, const char *path, int *out);
 
 typedef struct {
+    char *id;
     char *name;
     char *arguments;
 } tool_call_t;

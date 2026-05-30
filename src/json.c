@@ -168,7 +168,7 @@ char *json_build_request(const char *model, const char *sys_prompt,
 
     gbuf_append(&g, "{", 1);
     gbuf_appendf(&g, "\"model\":\"%s\"", model);
-    gbuf_append(&g, ",\"messages\":[", 13);
+    gbuf_append(&g, ",\"messages\":[", strlen(",\"messages\":["));
 
     int first = 1;
 
@@ -204,6 +204,13 @@ char *json_build_request(const char *model, const char *sys_prompt,
 
         gbuf_appendf(&g, "{\"role\":\"%s\",\"content\":\"%s\"", role_str, esc);
 
+        if (m->role == ROLE_ASSISTANT && m->reasoning_content)
+        {
+            char ert[8192];
+            if (utils_escape_json(m->reasoning_content, ert, sizeof(ert)) == 0)
+                gbuf_appendf(&g, ",\"reasoning_content\":\"%s\"", ert);
+        }
+
         if (m->role == ROLE_TOOL && m->tool_call_id)
         {
             char eid[256];
@@ -213,20 +220,21 @@ char *json_build_request(const char *model, const char *sys_prompt,
 
         if (m->role == ROLE_ASSISTANT && m->tool_name)
         {
-            gbuf_append(&g, ",\"tool_calls\":[{\"id\":\"", 20);
+            gbuf_append(&g, ",\"tool_calls\":[{\"id\":\"", strlen(",\"tool_calls\":[{\"id\":\""));
             char eid[256];
             if (m->tool_call_id && utils_escape_json(m->tool_call_id, eid, sizeof(eid)) == 0)
                 gbuf_append(&g, eid, strlen(eid));
-            gbuf_append(&g, "\",\"type\":\"function\",\"function\":{", 37);
+            gbuf_append(&g, "\",\"type\":\"function\",\"function\":{", strlen("\",\"type\":\"function\",\"function\":{"));
             char en[256];
             if (utils_escape_json(m->tool_name, en, sizeof(en)) == 0)
                 gbuf_appendf(&g, "\"name\":\"%s\"", en);
             if (m->tool_args)
             {
-                gbuf_append(&g, ",\"arguments\":", 13);
-                gbuf_append(&g, m->tool_args, strlen(m->tool_args));
+                char eargs[8192];
+                if (utils_escape_json(m->tool_args, eargs, sizeof(eargs)) == 0)
+                    gbuf_appendf(&g, ",\"arguments\":\"%s\"", eargs);
             }
-            gbuf_append(&g, "}}]}", 4);
+            gbuf_append(&g, "}}]", 3);
         }
 
         gbuf_append(&g, "}", 1);
@@ -438,8 +446,9 @@ int json_extract_tool_calls(const char *json, tool_call_t *calls, int max)
         if (*tc != '{') break;
         tc++;
 
-        const char *fn_str = NULL, *args_str = NULL;
-        int fn_len = 0, args_len = 0;
+        const char *id_str = NULL, *fn_str = NULL, *args_str = NULL;
+        int id_len = 0, fn_len = 0, args_len = 0;
+        char *args_unesc = NULL;
 
         while (*tc && *tc != '}')
         {
@@ -465,7 +474,9 @@ int json_extract_tool_calls(const char *json, tool_call_t *calls, int max)
                 if (*tc == '"')
                 {
                     tc++;
+                    id_str = tc;
                     while (*tc && *tc != '"') { if (*tc == '\\') tc++; if (*tc) tc++; }
+                    id_len = (int)(tc - id_str);
                     if (*tc) tc++;
                 }
             }
@@ -508,14 +519,44 @@ int json_extract_tool_calls(const char *json, tool_call_t *calls, int max)
                         }
                         else if (fklen == 9 && strncmp(fks, "arguments", 9) == 0)
                         {
-                            args_str = tc;
-                            if (*tc == '"')
+                                if (*tc == '"')
                             {
                                 tc++;
-                                const char *astart = tc;
-                                while (*tc && *tc != '"') { if (*tc == '\\') tc++; if (*tc) tc++; }
-                                args_len = (int)(tc - astart);
-                                if (*tc) tc++;
+                                size_t cap = 1024;
+                                args_unesc = malloc(cap);
+                                if (!args_unesc) { args_str = NULL; args_len = 0; break; }
+                                size_t u = 0;
+                                while (*tc && *tc != '"')
+                                {
+                                    if (u + 1 >= cap)
+                                    {
+                                        cap *= 2;
+                                        char *nt = realloc(args_unesc, cap);
+                                        if (!nt) { free(args_unesc); args_unesc = NULL; break; }
+                                        args_unesc = nt;
+                                    }
+                                    if (*tc == '\\')
+                                    {
+                                        tc++;
+                                        switch (*tc) {
+                                            case '"':  args_unesc[u++] = '"';  break;
+                                            case '\\': args_unesc[u++] = '\\'; break;
+                                            case 'n':  args_unesc[u++] = '\n'; break;
+                                            case 'r':  args_unesc[u++] = '\r'; break;
+                                            case 't':  args_unesc[u++] = '\t'; break;
+                                            default:   args_unesc[u++] = *tc;  break;
+                                        }
+                                        if (*tc) tc++;
+                                    }
+                                    else
+                                    {
+                                        args_unesc[u++] = *tc++;
+                                    }
+                                }
+                                args_unesc[u] = '\0';
+                                if (*tc == '"') tc++;
+                                args_str = args_unesc;
+                                args_len = (int)u;
                             }
                             else
                             {
@@ -561,8 +602,11 @@ int json_extract_tool_calls(const char *json, tool_call_t *calls, int max)
 
         if (fn_str && fn_len > 0)
         {
+            calls[count].id = (id_str && id_len > 0) ? strndup(id_str, id_len) : NULL;
             calls[count].name = strndup(fn_str, fn_len);
             calls[count].arguments = (args_str && args_len > 0) ? strndup(args_str, args_len) : strdup("");
+            free(args_unesc);
+            args_unesc = NULL;
             count++;
         }
 
@@ -690,6 +734,48 @@ int json_load_history(const char *filepath, msg_t **msgs, int *count)
                     m.content = tmp;
                 }
             }
+            else if (klen == 16 && strncmp(ks, "reasoning_content", 16) == 0)
+            {
+                if (buf[pos] == '"')
+                {
+                    pos++;
+                    size_t opos = 0;
+                    size_t tmpcap = 1024;
+                    char *tmp = malloc(tmpcap);
+                    if (!tmp) break;
+
+                    while (buf[pos] && buf[pos] != '"')
+                    {
+                        if (opos + 1 >= tmpcap)
+                        {
+                            tmpcap *= 2;
+                            char *nt = realloc(tmp, tmpcap);
+                            if (!nt) { free(tmp); break; }
+                            tmp = nt;
+                        }
+                        if (buf[pos] == '\\')
+                        {
+                            pos++;
+                            switch (buf[pos]) {
+                                case '"':  tmp[opos++] = '"';  break;
+                                case '\\': tmp[opos++] = '\\'; break;
+                                case 'n':  tmp[opos++] = '\n'; break;
+                                case 'r':  tmp[opos++] = '\r'; break;
+                                case 't':  tmp[opos++] = '\t'; break;
+                                default:   tmp[opos++] = buf[pos]; break;
+                            }
+                            if (buf[pos]) pos++;
+                        }
+                        else
+                        {
+                            tmp[opos++] = buf[pos++];
+                        }
+                    }
+                    tmp[opos] = '\0';
+                    if (buf[pos] == '"') pos++;
+                    m.reasoning_content = tmp;
+                }
+            }
             else if (klen == 12 && strncmp(ks, "tool_call_id", 12) == 0)
             {
                 if (buf[pos] == '"')
@@ -727,6 +813,7 @@ int json_load_history(const char *filepath, msg_t **msgs, int *count)
         else
         {
             free(m.content);
+            free(m.reasoning_content);
             free(m.tool_call_id);
         }
 
@@ -771,6 +858,12 @@ int json_save_history(const char *filepath, msg_t *msgs, int count)
         {
             if (utils_escape_json(m->content, esc, sizeof(esc)) == 0)
                 gbuf_appendf(&g, ",\"content\":\"%s\"", esc);
+        }
+
+        if (m->role == ROLE_ASSISTANT && m->reasoning_content)
+        {
+            if (utils_escape_json(m->reasoning_content, esc, sizeof(esc)) == 0)
+                gbuf_appendf(&g, ",\"reasoning_content\":\"%s\"", esc);
         }
 
         if (m->role == ROLE_TOOL && m->tool_call_id)

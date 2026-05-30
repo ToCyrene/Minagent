@@ -85,22 +85,17 @@ int http_post(http_t *h, const char *body, char **out, size_t *out_len)
     curl_easy_setopt(h->curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
 
     CURLcode res = curl_easy_perform(h->curl);
-    if (res != CURLE_OK)
-    {
-        if (out)
-            *out = NULL;
-        if (out_len)
-            *out_len = 0;
-        return -1;
-    }
-
-    long http_code = 0;
-    curl_easy_getinfo(h->curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     if (out)
         *out = h->resp_buf;
     if (out_len)
         *out_len = h->resp_len;
+
+    if (res != CURLE_OK)
+        return -1;
+
+    long http_code = 0;
+    curl_easy_getinfo(h->curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     return (http_code == 200) ? 0 : -1;
 }
