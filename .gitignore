@@ -1,0 +1,11 @@
+# binary
+bin/
+*.o
+*.so
+*.a
+
+# build artifacts
+obj/
+
+# config (not template)
+minagent.conf
