@@ -12,6 +12,7 @@ typedef struct {
 
 void tools_set_allowed_dirs(const char **dirs, int count);
 void tools_set_banned_cmds(const char **cmds, int count);
+void tools_set_timeout(int seconds);
 char *tool_read_file(const char *args_json);
 char *tool_write_file(const char *args_json);
 char *tool_run_bash(const char *args_json);
